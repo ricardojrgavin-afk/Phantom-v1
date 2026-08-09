@@ -1,0 +1,7 @@
+/github
+/storage
+/scripts
+*.rar
+*.zip
+.vscode
+*.md
