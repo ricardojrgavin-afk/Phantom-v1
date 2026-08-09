@@ -1,0 +1,55 @@
+name: Auto Release on Commit
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Release Manifest
+        id: manifest
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/build_release_manifest.py
+
+      - name: Build Runtime Zip
+        run: |
+          zip -r Phantom.zip \
+            Main.lua \
+            loader.lua \
+            GuiLibrary.lua \
+            version.json \
+            games \
+            lib \
+            src \
+            storage \
+            release-manifest.json
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.manifest.outputs.tag }}
+          name: Phantom ${{ steps.manifest.outputs.version }}
+          body: ${{ github.event.head_commit.message }}
+          files: |
+            Phantom.zip
+            release-manifest.json
