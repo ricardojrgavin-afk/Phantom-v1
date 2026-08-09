@@ -1,4 +1,3 @@
-
 repeat task.wait() until game:IsLoaded()
 
 local environment = getgenv() or getfenv() or {}
@@ -20,8 +19,8 @@ end
 
 local HttpService = game:GetService("HttpService")
 local ROOT = "Phantom"
-local REPO_OWNER = "XzynAstralz"
-local REPO_NAME = "Phantom"
+local REPO_OWNER = "ricardojrgavin-afk"
+local REPO_NAME = "Phantom-v1"
 local LOADER_PLACE_ID = tostring(game.PlaceId)
 local LOADER_GAME_ID = tonumber(game.GameId) and tostring(game.GameId) or ""
 local LOADER_DISPLAY_ID = LOADER_GAME_ID ~= "" and LOADER_GAME_ID or LOADER_PLACE_ID
