@@ -813,6 +813,35 @@ end)
 
 --// Render
 runcode(function()
+    local FovChanger = {}
+    local FovSlider = {}
+    local defaultFOV = Camera.FieldOfView
+
+    FovChanger = GuiLibrary.Registry.renderPanel.API.CreateOptionsButton({
+        Name = "FovChanger",
+        Function = function(callback)
+            if callback then
+                defaultFOV = Camera.FieldOfView
+                RunLoops:BindToHeartbeat("FovChanger", function()
+                    Camera.FieldOfView = FovSlider.Value
+                end)
+            else
+                RunLoops:UnbindFromHeartbeat("FovChanger")
+                Camera.FieldOfView = defaultFOV
+            end
+        end
+    })
+
+    FovSlider = FovChanger.CreateSlider({
+        Name = "FOV Value",
+        Min = 30,
+        Max = 120,
+        Default = 80,
+        Round = 1
+    })
+end)
+
+runcode(function()
     local ViewModel, Rainbow, Smooth, Arms, Speed, Transparency, WeaponColor = {}, {}, {}, {}, {}, {}, {}
     local saved, hue, index, last = {}, 0, 1, 0
 
