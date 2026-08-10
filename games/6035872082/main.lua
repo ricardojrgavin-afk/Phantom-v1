@@ -547,7 +547,7 @@ runcode(function()
     local target
 
     local TargetPart = {Value = "Head"}
-    local Mode = {Value = "Mouse"}
+    local Mode = {Value = "FOV Circle"}
     local Priority = {Value = "Closest"}
     local TargetingFOV = {Value = 100}
     local MaxDistance = {Value = 1000}
@@ -556,6 +556,20 @@ runcode(function()
     local WallCheck = {Enabled = true}
     local TeamCheck = {Enabled = true}
     local ClosestPart = {Enabled = false}
+    local DrawFOV = {Enabled = true}
+    local FOVColor = {Color = Color3.fromRGB(255, 255, 255)}
+
+    -- Initialize Drawing API Circle
+    local fovCircle = nil
+    if Drawing and type(Drawing.new) == "function" then
+        fovCircle = Drawing.new("Circle")
+        fovCircle.Thickness = 1.5
+        fovCircle.NumSides = 64
+        fovCircle.Filled = false
+        fovCircle.Transparency = 1
+        fovCircle.Visible = false
+    end
+
     do
         local ok, ItemLib = pcall(require, Controllers.ItemLibrary)
         if ok and ItemLib then
@@ -581,9 +595,24 @@ runcode(function()
         Function = function(callback)
             if callback then
                 RunLoops:BindToHeartbeat("SilentAim", function()
+                    -- Manage FOV Circle Drawing
+                    if fovCircle then
+                        local isFovActive = (Mode.Value == "FOV Circle" or Mode.Value == "Mouse")
+                        local shouldBeVisible = DrawFOV.Enabled and isFovActive
+                        fovCircle.Visible = shouldBeVisible
+                        
+                        if shouldBeVisible then
+                            local center = Camera.ViewportSize / 2
+                            fovCircle.Position = Vector2.new(center.X, center.Y)
+                            fovCircle.Radius = TargetingFOV.Value
+                            fovCircle.Color = FOVColor.Color or Color3.fromRGB(255, 255, 255)
+                        end
+                    end
+
+                    -- Query entities based on selected targeting logic
                     target = PlayerUtility.NewGetNearestEntity({
                         targetPart = TargetPart.Value,
-                        wallCheck = (WallCheck.Enabled) or (false and WallCheck.Enabled),
+                        wallCheck = WallCheck.Enabled,
                         mode = Mode.Value,
                         fov = TargetingFOV.Value,
                         maxDistance = MaxDistance.Value,
@@ -592,6 +621,7 @@ runcode(function()
                         closestPart = ClosestPart.Enabled,
                     })
                 end)
+
                 oldRaycast = Controllers.util.Raycast
                 Controllers.util.Raycast = function(...)
                     local args = {...}
@@ -608,9 +638,13 @@ runcode(function()
                 RunLoops:UnbindFromHeartbeat("SilentAim")
                 Controllers.util.Raycast = oldRaycast or Controllers.util.Raycast
                 target = nil
+                if fovCircle then
+                    fovCircle.Visible = false
+                end
             end
         end
     })
+
     TargetPart = SilentAim.CreateDropdown({
         Name = "Target Part",
         List = {"Head","HumanoidRootPart","UpperTorso","LowerTorso","Random"},
@@ -618,8 +652,8 @@ runcode(function()
     })
     Mode = SilentAim.CreateDropdown({
         Name = "Targeting Logic",
-        List = {"Mouse","Distance"},
-        Default = "Mouse"
+        List = {"Mouse", "Distance", "FOV Circle"},
+        Default = "FOV Circle"
     })
     Priority = SilentAim.CreateDropdown({
         Name = "Priority",
@@ -663,9 +697,21 @@ runcode(function()
         Name = "Closest Part",
         Default = false
     })
+    DrawFOV = SilentAim.CreateToggle({
+        Name = "Draw FOV",
+        Default = true
+    })
+    FOVColor = GuiLibrary.CreateColorOption(SilentAim, {
+        Name = "FOV Color",
+        Default = {R = 255, G = 255, B = 255}
+    })
 
+    -- UI Visibility Triggers
     Mode:ShowWhen("Distance", MaxDistance)
     Mode:ShowWhen("Mouse", TargetingFOV)
+    Mode:ShowWhen("FOV Circle", TargetingFOV)
+    Mode:ShowWhen("FOV Circle", DrawFOV)
+    Mode:ShowWhen("FOV Circle", FOVColor)
 end)
 
 --// Blatant
