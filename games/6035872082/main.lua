@@ -183,7 +183,6 @@ do
 
         bind(Workspace.ChildAdded)
         bind(Workspace.ChildRemoved)
-        -- Removed DescendantAdded optimization to eliminate continuous background lag
 
         for _, attr in ipairs({ "MatchmadeStatus", "MatchmadeGameOver", "EnvironmentID", "MatchID" }) do
             bind(Workspace:GetAttributeChangedSignal(attr))
@@ -353,7 +352,6 @@ local hookmuzzle = function()
     return Camera.CFrame.Position
 end
 
--- Optimized Viewmodel Lookup Cache
 local cachedWeapon = nil
 local function getweapon()
     if cachedWeapon and cachedWeapon.Parent and string.find(cachedWeapon.Name, lplr.Name) then
@@ -371,8 +369,12 @@ local function getweapon()
     return nil
 end
 
--- Custom entity handler optimized
+-- Original-style Wallcheck logic using cached RaycastParams + Game Native Utility Raycast
 do
+    local rawRayParams = RaycastParams.new()
+    rawRayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rawRayParams.IgnoreWater = true
+
     local function getRandomPart(model)
         local parts = {}
         for _, part in ipairs(model:GetDescendants()) do
@@ -384,12 +386,29 @@ do
     end
 
     local function isVisible(localChar, targetPart)
-        local params = RaycastParams.new()
-        params.FilterDescendantsInstances = {localChar}
-        params.FilterType = Enum.RaycastFilterType.Exclude
+        local origin = Camera.CFrame.Position
+        local targetPos = targetPart.Position
 
-        local direction = targetPart.Position - Camera.CFrame.Position
-        local ray = workspace:Raycast(Camera.CFrame.Position, direction, params)
+        -- 1. Try game's native raycaster if available (original game logic)
+        local rawRaycast = rawget(Controllers.util, "_oldRaycast") or Controllers.util.Raycast
+        if rawRaycast then
+            local hit = rawRaycast(origin, targetPos)
+            if not hit then return true end
+            if typeof(hit) == "Instance" then
+                return hit:IsDescendantOf(targetPart.Parent)
+            elseif type(hit) == "table" and hit.Instance then
+                return hit.Instance:IsDescendantOf(targetPart.Parent)
+            end
+        end
+
+        -- 2. Fallback robust workspace raycast
+        local filterList = {localChar, Camera}
+        local viewmodels = workspace:FindFirstChild("ViewModels")
+        if viewmodels then table.insert(filterList, viewmodels) end
+
+        rawRayParams.FilterDescendantsInstances = filterList
+        local direction = targetPos - origin
+        local ray = workspace:Raycast(origin, direction, rawRayParams)
 
         return ray == nil or ray.Instance:IsDescendantOf(targetPart.Parent)
     end
@@ -429,7 +448,6 @@ do
             local mouseDist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
             if selectionMode ~= "Distance" and mouseDist > fov then continue end
 
-            -- Raycast occurs LAST after filtering FOV/Distance
             if args.wallCheck ~= false and not isVisible(char, target) then continue end
 
             table.insert(results, {
@@ -626,6 +644,7 @@ runcode(function()
                 end)
 
                 oldRaycast = Controllers.util.Raycast
+                Controllers.util._oldRaycast = oldRaycast
                 Controllers.util.Raycast = function(...)
                     local args = {...}
                     if target and math.random(100) <= HitChance.Value then
@@ -640,6 +659,7 @@ runcode(function()
             else
                 RunLoops:UnbindFromHeartbeat("SilentAim")
                 Controllers.util.Raycast = oldRaycast or Controllers.util.Raycast
+                Controllers.util._oldRaycast = nil
                 target = nil
                 if fovCircle then
                     fovCircle.Visible = false
@@ -1263,7 +1283,6 @@ runcode(function()
         return table.concat(out)
     end
 
-    -- Cached Font creation to prevent per-frame memory allocation lag
     local fontCache = {}
     local function getFontFace()
         local family = fontOpt.Value
