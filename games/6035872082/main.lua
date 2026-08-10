@@ -181,6 +181,10 @@ do
             end
         end
 
+        bind(Workspace.ChildAdded)
+        bind(Workspace.ChildRemoved)
+        bind(Workspace.DescendantAdded)
+
         for _, attr in ipairs({ "MatchmadeStatus", "MatchmadeGameOver", "EnvironmentID", "MatchID" }) do
             bind(Workspace:GetAttributeChangedSignal(attr))
         end
@@ -265,6 +269,22 @@ local old_setmetatable; old_setmetatable = hookfunction(getrenv().setmetatable, 
     
     return old_setmetatable(t, mt)
 end))
+
+local oldgc = getgc; getgc = function(...)
+    local gc = oldgc(...)
+    local filtered = {}
+    for _, v in ipairs(gc) do
+        if typeof(v) == "function" then
+            local src = debug.info(v, "s")
+            if not (src and (src:find("LocalScript3") or src:find("MiscellaneousController"))) then
+                table.insert(filtered, v)
+            end
+        else
+            table.insert(filtered, v)
+        end
+    end
+    return filtered
+end
 
 hookfunction(old_kick, newcclosure(function(self, ...)
     if self == lplr then
@@ -1242,8 +1262,6 @@ runcode(function()
         return table.concat(out)
     end
 
-    -- Cached Font to prevent allocating Font objects inside Heartbeat every frame
-    local cachedFont, cachedFontKey
     local function getFontFace()
         local family = fontOpt.Value
         if family == "GothamSSm" or family == "Gotham" then
@@ -1251,19 +1269,14 @@ runcode(function()
         end
 
         family = family or "Montserrat"
+
         local weightName = (weight.Value == "Off" and "Regular") or weight.Value
-        local key = family .. "_" .. weightName
 
-        if key ~= cachedFontKey or not cachedFont then
-            cachedFontKey = key
-            cachedFont = Font.new(
-                "rbxasset://fonts/families/" .. family .. ".json",
-                Enum.FontWeight[weightName],
-                Enum.FontStyle.Normal
-            )
-        end
-
-        return cachedFont
+        return Font.new(
+            "rbxasset://fonts/families/" .. family .. ".json",
+            Enum.FontWeight[weightName],
+            Enum.FontStyle.Normal
+        )
     end
 
     Tags = GuiLibrary.Registry.renderPanel.API.CreateOptionsButton({
