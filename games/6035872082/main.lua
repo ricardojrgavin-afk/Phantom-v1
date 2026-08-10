@@ -10,7 +10,6 @@ end
 local HttpService = game:GetService("HttpService")
 local Players = cloneref(game:GetService("Players"))
 local Workspace = cloneref(game:GetService("Workspace"))
-local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
 local Lighting = cloneref(game:GetService("Lighting"))
 local CollectionService = cloneref(game:GetService("CollectionService"))
 local RunService = cloneref(game:GetService("RunService"))
@@ -27,6 +26,9 @@ local RunLoops = Runtime.RunLoops
 local runcode = Runtime.run
 local PlayerUtility = phantom.module:Load("utility") or error("Failed to load utility module")
 local modLoaded 
+
+local ZERO_VECTOR = Vector3.zero
+local DEFAULT_WEAPON_DATA = {speed = 300, grav = 0}
 
 local function safeNew(className)
     local ok, inst = pcall(function() return Instance.new(className) end)
@@ -174,16 +176,27 @@ do
             newData.changed:Fire()
         end
     end
+
     function gamefunction:hookgame()
+        local updatePending = false
+        local function requestUpdate()
+            if not updatePending then
+                updatePending = true
+                task.defer(function()
+                    updatePending = false
+                    gamefunction:update()
+                end)
+            end
+        end
+
         local function bind(signal)
             if signal and signal.Connect then
-                table.insert(newData.connections, signal:Connect(self.update))
+                table.insert(newData.connections, signal:Connect(requestUpdate))
             end
         end
 
         bind(Workspace.ChildAdded)
         bind(Workspace.ChildRemoved)
-        -- Removed DescendantAdded optimization to eliminate continuous background lag
 
         for _, attr in ipairs({ "MatchmadeStatus", "MatchmadeGameOver", "EnvironmentID", "MatchID" }) do
             bind(Workspace:GetAttributeChangedSignal(attr))
@@ -231,18 +244,23 @@ end
 local names = {"LocalScript3", "MiscellaneousController", "AnalyticsPipeline"}
 local function is_ac_calling()
     for i = 2, 15 do
-        local _, src = pcall(debug.info, i, "s")
-        for _, n in names do if src and src:find(n) then return true end end
+        local ok, src = pcall(debug.info, i, "s")
+        if ok and src then
+            for j = 1, #names do
+                if string.find(src, names[j], 1, true) then return true end
+            end
+        end
     end
 end
+
 local old_debug_info; old_debug_info = hookfunction(debug.info, newcclosure(function(f, l, ...)
-    local res = { old_debug_info(f, l, ...) }
-    if type(l) == "string" and l:find("s") and res[1] then
-        if res[1]:find("Ghost") or not res[1]:find(".lua") then
+    local res1, res2, res3, res4 = old_debug_info(f, l, ...)
+    if type(l) == "string" and string.find(l, "s", 1, true) and res1 then
+        if string.find(res1, "Ghost", 1, true) or not string.find(res1, ".lua", 1, true) then
             return "CommonLib.lua"
         end
     end
-    return unpack(res)
+    return res1, res2, res3, res4
 end))
 
 local old_debug_traceback; old_debug_traceback = hookfunction(debug.traceback, newcclosure(function(...)
@@ -255,28 +273,26 @@ end))
 
 local old_kick = lplr.Kick
 local old_setmetatable; old_setmetatable = hookfunction(getrenv().setmetatable, newcclosure(function(t, mt)
-    if mt and type(mt) == "table" and rawget(mt, "__mode") then
+    if mt and type(mt) == "table" then
         local mode = rawget(mt, "__mode")
-        
         if mode == "kv" or mode == "v" or mode == "k" then
             local stack = debug.traceback()
-            
-            if stack:find("MiscellaneousController") or stack:find("LocalScript3") or stack:find("CameraSecurity") or stack:find("AnalyticsPipelineController") then
+            if string.find(stack, "MiscellaneousController", 1, true) or string.find(stack, "LocalScript3", 1, true) or string.find(stack, "CameraSecurity", 1, true) or string.find(stack, "AnalyticsPipelineController", 1, true) then
                 return old_setmetatable({1, 2, 3}, {})
             end
         end
     end
-    
     return old_setmetatable(t, mt)
 end))
 
 local oldgc = getgc; getgc = function(...)
     local gc = oldgc(...)
-    local filtered = {}
-    for _, v in ipairs(gc) do
+    local filtered = table.create(#gc)
+    for i = 1, #gc do
+        local v = gc[i]
         if typeof(v) == "function" then
             local src = debug.info(v, "s")
-            if not (src and (src:find("LocalScript3") or src:find("MiscellaneousController"))) then
+            if not (src and (string.find(src, "LocalScript3", 1, true) or string.find(src, "MiscellaneousController", 1, true))) then
                 table.insert(filtered, v)
             end
         else
@@ -290,7 +306,6 @@ hookfunction(old_kick, newcclosure(function(self, ...)
     if self == lplr then
         return nil
     end
-    
     return old_kick(self, ...)
 end))
 
@@ -356,14 +371,14 @@ end
 -- Optimized Viewmodel Lookup Cache
 local cachedWeapon = nil
 local function getweapon()
-    if cachedWeapon and cachedWeapon.Parent and string.find(cachedWeapon.Name, lplr.Name) then
+    if cachedWeapon and cachedWeapon.Parent and string.find(cachedWeapon.Name, lplr.Name, 1, true) then
         return cachedWeapon
     end
     local path = workspace:FindFirstChild("ViewModels")
     path = path and path:FindFirstChild("FirstPerson")
     if not path then return nil end
     for _, v in ipairs(path:GetChildren()) do
-        if v:IsA("Model") and string.find(v.Name, lplr.Name) then
+        if v:IsA("Model") and string.find(v.Name, lplr.Name, 1, true) then
             cachedWeapon = v
             return v
         end
@@ -373,23 +388,25 @@ end
 
 -- Custom entity handler optimized
 do
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
     local function getRandomPart(model)
-        local parts = {}
-        for _, part in ipairs(model:GetDescendants()) do
-            if part:IsA("BasePart") then
-                table.insert(parts, part)
+        local children = model:GetChildren()
+        for i = 1, #children do
+            local child = children[i]
+            if child:IsA("BasePart") then
+                return child
             end
         end
-        return #parts > 0 and parts[math.random(1, #parts)] or nil
+        return model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
     end
 
     local function isVisible(localChar, targetPart)
-        local params = RaycastParams.new()
-        params.FilterDescendantsInstances = {localChar}
-        params.FilterType = Enum.RaycastFilterType.Exclude
-
-        local direction = targetPart.Position - Camera.CFrame.Position
-        local ray = workspace:Raycast(Camera.CFrame.Position, direction, params)
+        rayParams.FilterDescendantsInstances = {localChar}
+        local camPos = Camera.CFrame.Position
+        local direction = targetPart.Position - camPos
+        local ray = workspace:Raycast(camPos, direction, rayParams)
 
         return ray == nil or ray.Instance:IsDescendantOf(targetPart.Parent)
     end
@@ -406,7 +423,8 @@ do
         local fov = args.fov or math.huge
         local targetPart = args.targetPart or "HumanoidRootPart"
 
-        local results = {}
+        local bestEntity, bestPart = nil, nil
+        local bestMetric = math.huge
 
         for _, entity in ipairs(CollectionService:GetTagged("Entity")) do
             if entity == char or not entity:IsA("Model") then continue end
@@ -432,31 +450,27 @@ do
             -- Raycast occurs LAST after filtering FOV/Distance
             if args.wallCheck ~= false and not isVisible(char, target) then continue end
 
-            table.insert(results, {
-                entity = entity,
-                part = target,
-                distance = distance,
-                mouseDist = mouseDist,
-                health = hum.Health
-            })
+            local metric
+            if priorityMode == "Lowest Health" then
+                metric = hum.Health
+            elseif selectionMode == "Distance" then
+                metric = distance
+            else
+                metric = mouseDist
+            end
+
+            if metric < bestMetric then
+                bestMetric = metric
+                bestEntity = entity
+                bestPart = target
+            end
         end
 
-        if #results == 0 then return nil end
-
-        table.sort(results, function(a, b)
-            if priorityMode == "Lowest Health" then
-                return a.health < b.health
-            elseif selectionMode == "Distance" then
-                return a.distance < b.distance
-            end
-            return a.mouseDist < b.mouseDist
-        end)
-
-        return results[1].part, results[1].entity
+        return bestPart, bestEntity
     end
 
     PlayerUtility.predictPosition = function(target, projectileSpeed, shooterVelocity)
-        shooterVelocity = shooterVelocity or Vector3.new()
+        shooterVelocity = shooterVelocity or ZERO_VECTOR
 
         local startPos = hookmuzzle()
         local targetPos = target.Position
@@ -588,11 +602,11 @@ runcode(function()
     end
 
     local function getWeaponData()
-        local ok, fc = pcall(require, lplr.PlayerScripts.Controllers.FighterController)
-        if ok and fc and fc.LocalFighter and fc.LocalFighter.EquippedItem then
-            return WEAPON_CONFIG[fc.LocalFighter.EquippedItem.Name] or {speed = 300, grav = 0}
+        local fc = Controllers.fighter
+        if fc and fc.LocalFighter and fc.LocalFighter.EquippedItem then
+            return WEAPON_CONFIG[fc.LocalFighter.EquippedItem.Name] or DEFAULT_WEAPON_DATA
         end
-        return {speed = 300, grav = 0}
+        return DEFAULT_WEAPON_DATA
     end
 
     local SilentAim; SilentAim = GuiLibrary.Registry.combatPanel.API.CreateOptionsButton({
@@ -894,14 +908,41 @@ runcode(function()
 
     local colors = {Color3.fromRGB(180,180,180), Color3.fromRGB(80,50,230),Color3.fromRGB(255,50,200),Color3.fromRGB(255,130,0), Color3.fromRGB(255,220,0)}
 
+    local lastWeapon = nil
+    local cachedVisualParts = {}
+    local cachedArmParts = {}
+
     ViewModel = GuiLibrary.Registry.renderPanel.API.CreateOptionsButton({
         Name = "ViewModel",
         Function = function(callback)
             if callback then
                 RunLoops:BindToHeartbeat("ViewModel", function()
                     local weapon = getweapon()
-                    local visual = weapon and weapon:FindFirstChild("ItemVisual")
-                    if not visual then return end
+                    if not weapon then return end
+
+                    if weapon ~= lastWeapon then
+                        lastWeapon = weapon
+                        cachedVisualParts = {}
+                        cachedArmParts = {}
+
+                        local visual = weapon:FindFirstChild("ItemVisual")
+                        if visual then
+                            for _, v in ipairs(visual:GetDescendants()) do
+                                if v:IsA("BasePart") then
+                                    table.insert(cachedVisualParts, v)
+                                end
+                            end
+                        end
+
+                        for _, name in ipairs({"LeftArm", "RightArm"}) do
+                            local arm = weapon:FindFirstChild(name)
+                            if arm and arm:IsA("BasePart") then
+                                table.insert(cachedArmParts, arm)
+                            end
+                        end
+                    end
+
+                    if #cachedVisualParts == 0 then return end
 
                     local color = WeaponColor.Color
                     if Rainbow.Enabled then
@@ -917,28 +958,25 @@ runcode(function()
                         end
                     end
 
-                    for _,v in ipairs(visual:GetDescendants()) do
-                        if v:IsA("BasePart") then
-                            if not saved[v] then
-                                saved[v] = {v.Color, v.Transparency}
-                            end
+                    local transVal = Transparency.Value / 100
 
-                            v.Color = color
-                            v.Transparency = Transparency.Value / 100
+                    for i = 1, #cachedVisualParts do
+                        local v = cachedVisualParts[i]
+                        if not saved[v] then
+                            saved[v] = {v.Color, v.Transparency}
                         end
+                        v.Color = color
+                        v.Transparency = transVal
                     end
 
                     if Arms.Enabled then
-                        for _,name in ipairs({"LeftArm","RightArm"}) do
-                            local arm = weapon:FindFirstChild(name)
-                            if arm then
-                                if not saved[arm] then
-                                    saved[arm] = {arm.Color, arm.Transparency}
-                                end
-
-                                arm.Color = color
-                                arm.Transparency = Transparency.Value / 100
+                        for i = 1, #cachedArmParts do
+                            local arm = cachedArmParts[i]
+                            if not saved[arm] then
+                                saved[arm] = {arm.Color, arm.Transparency}
                             end
+                            arm.Color = color
+                            arm.Transparency = transVal
                         end
                     end
                 end)
@@ -951,6 +989,9 @@ runcode(function()
                     end
                 end
                 saved = {}
+                cachedVisualParts = {}
+                cachedArmParts = {}
+                lastWeapon = nil
             end
         end
     })
@@ -993,9 +1034,9 @@ runcode(function()
                 coroutine.wrap(Controllers.pData.CurrentData.ReplicateFromServer)(Controllers.pData.CurrentData, "DataValueChanged", "CosmeticInventory", spoofTbl)
 
                 local remote = ReplicatedStorage.Remotes.Data.EquipCosmetic
-                local method = string.lower("fireserver")
                 hook = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-                    if self and self == remote and string.lower(getnamecallmethod()) == method then
+                    local method = getnamecallmethod()
+                    if self and self == remote and (method == "FireServer" or method == "fireServer" or string.lower(method) == "fireserver") then
                         local args = {...}
                         wepTbl = Controllers.pData.CurrentData:Get("WeaponInventory")
                         for _, v in wepTbl do
@@ -1108,6 +1149,7 @@ runcode(function()
                 RunLoops:BindToHeartbeat("ESP", function()
                     local char = PlayerUtility.GetCharacter()
                     local seen = {}
+                    local targetTrans = fill.Value / 100
 
                     for _, entity in ipairs(CollectionService:GetTagged("Entity")) do
                         if entity == char or not entity:IsA("Model") then continue end
@@ -1128,19 +1170,23 @@ runcode(function()
 
                         seen[entity] = true
 
-                        if not highlights[entity] then
-                            local hl = safeNew("Highlight")
+                        local hl = highlights[entity]
+                        if not hl then
+                            hl = safeNew("Highlight")
                             if hl then
                                 hl.FillColor = Color3.fromRGB(255,50,50)
                                 hl.OutlineColor = Color3.fromRGB(255,255,255)
                                 hl.OutlineTransparency = 0
+                                hl.FillTransparency = targetTrans
                                 hl.Adornee = entity
                                 hl.Parent = CoreGui
                                 highlights[entity] = hl
                             end
+                        else
+                            if hl.FillTransparency ~= targetTrans then
+                                hl.FillTransparency = targetTrans
+                            end
                         end
-
-                        highlights[entity].FillTransparency = fill.Value / 100
                     end
 
                     for entity in pairs(highlights) do
@@ -1172,6 +1218,7 @@ end)
 
 runcode(function()
     local cache = {}
+    local tagParts = {}
     local gui
 
     local Tags = {}
@@ -1241,7 +1288,12 @@ runcode(function()
             frame = frame,
             bg = bgf,
             corner = cornerObj,
-            text = text
+            text = text,
+            lastText = "",
+            lastFont = nil,
+            lastSize = nil,
+            lastBgTrans = nil,
+            lastCorner = nil
         }
 
         return cache[entity]
@@ -1263,7 +1315,7 @@ runcode(function()
         return table.concat(out)
     end
 
-    -- Cached Font creation to prevent per-frame memory allocation lag
+    -- Cached Font creation
     local fontCache = {}
     local function getFontFace()
         local family = fontOpt.Value
@@ -1296,6 +1348,11 @@ runcode(function()
                     local seen = {}
                     local shootingRange = workspace:FindFirstChild("ShootingRangeEntities")
 
+                    local currentFont = getFontFace()
+                    local currentSize = size.Value
+                    local targetBgTrans = bg.Enabled and 0.35 or 1
+                    local targetCornerOffset = corner.Value == "Square" and 0 or 6
+
                     for _, entity in ipairs(CollectionService:GetTagged("Entity")) do
                         if entity == char or not entity:IsA("Model") then continue end
                         if shootingRange and entity:IsDescendantOf(shootingRange) then continue end
@@ -1316,15 +1373,17 @@ runcode(function()
                         seen[entity] = true
 
                         local tag = cache[entity] or makeTag(entity)
+                        if not tag then continue end
+
                         local plr = Players:GetPlayerFromCharacter(entity)
-                        local parts = {}
+                        table.clear(tagParts)
 
                         local username = plr and (name.Enabled and plr.DisplayName ~= "" and plr.DisplayName or plr.Name) or entity.Name
-                        parts[#parts+1] = '<font color="rgb(255,255,255)">' .. username:upper() .. "</font>"
+                        tagParts[1] = '<font color="rgb(255,255,255)">' .. username:upper() .. "</font>"
 
                         if dist.Enabled and localRoot then
                             local d = math.floor((localRoot.Position - root.Position).Magnitude)
-                            parts[#parts+1] = ('<font color="rgb(85,255,85)">%s%s%s</font>'):format(brackets.Enabled and "[" or "", d, brackets.Enabled and "]" or "")
+                            tagParts[#tagParts+1] = ('<font color="rgb(85,255,85)">%s%d%s</font>'):format(brackets.Enabled and "[" or "", d, brackets.Enabled and "]" or "")
                         end
 
                         if level.Enabled then
@@ -1337,30 +1396,48 @@ runcode(function()
                                 txt = ('<font color="rgb(255,215,0)">%s%s%s</font>'):format(brackets.Enabled and "[" or "", txt, brackets.Enabled and "]" or "")
                             end
 
-                            parts[#parts+1] = txt
+                            tagParts[#tagParts+1] = txt
                         end
 
                         if hp.Enabled then
                             local h = math.floor(hum.Health)
                             local c = Color3.fromHSV(math.clamp(h / hum.MaxHealth, 0, 1) / 3, 0.9, 1)
-                            parts[#parts+1] = ('<font color="%s">%s%s%s</font>'):format(rgb(c), brackets.Enabled and "[" or "", h, brackets.Enabled and "]" or "")
+                            tagParts[#tagParts+1] = ('<font color="%s">%s%d%s</font>'):format(rgb(c), brackets.Enabled and "[" or "", h, brackets.Enabled and "]" or "")
                         end
 
-                        tag.text.Text = table.concat(parts, " ")
-                        tag.text.FontFace = getFontFace()
-                        tag.text.TextSize = size.Value
+                        local textStr = table.concat(tagParts, " ")
+                        if tag.lastText ~= textStr then
+                            tag.lastText = textStr
+                            tag.text.Text = textStr
+                            local bounds = tag.text.TextBounds
+                            tag.frame.Size = UDim2.fromOffset(bounds.X + 10, bounds.Y + 6)
+                        end
 
-                        tag.bg.BackgroundTransparency = bg.Enabled and 0.35 or 1
-                        tag.corner.CornerRadius = UDim.new(0, corner.Value == "Square" and 0 or 6)
+                        if tag.lastFont ~= currentFont then
+                            tag.lastFont = currentFont
+                            tag.text.FontFace = currentFont
+                        end
 
-                        local bounds = tag.text.TextBounds
-                        tag.frame.Size = UDim2.fromOffset(bounds.X + 10, bounds.Y + 6)
+                        if tag.lastSize ~= currentSize then
+                            tag.lastSize = currentSize
+                            tag.text.TextSize = currentSize
+                        end
+
+                        if tag.lastBgTrans ~= targetBgTrans then
+                            tag.lastBgTrans = targetBgTrans
+                            tag.bg.BackgroundTransparency = targetBgTrans
+                        end
+
+                        if tag.lastCorner ~= targetCornerOffset then
+                            tag.lastCorner = targetCornerOffset
+                            tag.corner.CornerRadius = UDim.new(0, targetCornerOffset)
+                        end
 
                         local pos, visible = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, hum.HipHeight + 1.2, 0))
+                        local isVisibleOnScreen = visible and pos.Z > 0
+                        tag.frame.Visible = isVisibleOnScreen
 
-                        tag.frame.Visible = visible and pos.Z > 0
-
-                        if tag.frame.Visible then
+                        if isVisibleOnScreen then
                             tag.frame.Position = UDim2.fromOffset(pos.X, pos.Y)
                         end
                     end
