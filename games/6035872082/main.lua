@@ -181,9 +181,6 @@ do
             end
         end
 
-        bind(Workspace.ChildAdded)
-        bind(Workspace.ChildRemoved)
-
         for _, attr in ipairs({ "MatchmadeStatus", "MatchmadeGameOver", "EnvironmentID", "MatchID" }) do
             bind(Workspace:GetAttributeChangedSignal(attr))
         end
@@ -219,7 +216,7 @@ do
     end
 end
 
---// Anti-cheat Bypass / Logging
+--// Credit: Original concept by the community
 
 for _, con in getconnections(game:GetService("LogService").MessageOut) do
     if con.Function and islclosure(con.Function) then
@@ -268,22 +265,6 @@ local old_setmetatable; old_setmetatable = hookfunction(getrenv().setmetatable, 
     
     return old_setmetatable(t, mt)
 end))
-
-local oldgc = getgc; getgc = function(...)
-    local gc = oldgc(...)
-    local filtered = {}
-    for _, v in ipairs(gc) do
-        if typeof(v) == "function" then
-            local src = debug.info(v, "s")
-            if not (src and (src:find("LocalScript3") or src:find("MiscellaneousController"))) then
-                table.insert(filtered, v)
-            end
-        else
-            table.insert(filtered, v)
-        end
-    end
-    return filtered
-end
 
 hookfunction(old_kick, newcclosure(function(self, ...)
     if self == lplr then
@@ -335,7 +316,7 @@ do
     Controllers.cosLib = require(ReplicatedModules:WaitForChild("CosmeticLibrary"))
 end
 
---// Helper functions
+--// Other
 
 local hookmuzzle = function()
     local char = PlayerUtility.GetCharacter()
@@ -352,29 +333,18 @@ local hookmuzzle = function()
     return Camera.CFrame.Position
 end
 
-local cachedWeapon = nil
 local function getweapon()
-    if cachedWeapon and cachedWeapon.Parent and string.find(cachedWeapon.Name, lplr.Name) then
-        return cachedWeapon
-    end
-    local path = workspace:FindFirstChild("ViewModels")
-    path = path and path:FindFirstChild("FirstPerson")
-    if not path then return nil end
+    local path = workspace:FindFirstChild("ViewModels"):FindFirstChild("FirstPerson")
     for _, v in ipairs(path:GetChildren()) do
         if v:IsA("Model") and string.find(v.Name, lplr.Name) then
-            cachedWeapon = v
             return v
         end
     end
     return nil
 end
 
--- Original-style Wallcheck logic using cached RaycastParams + Game Native Utility Raycast
+--// Custom entity handler
 do
-    local rawRayParams = RaycastParams.new()
-    rawRayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rawRayParams.IgnoreWater = true
-
     local function getRandomPart(model)
         local parts = {}
         for _, part in ipairs(model:GetDescendants()) do
@@ -386,29 +356,12 @@ do
     end
 
     local function isVisible(localChar, targetPart)
-        local origin = Camera.CFrame.Position
-        local targetPos = targetPart.Position
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = {localChar}
+        params.FilterType = Enum.RaycastFilterType.Exclude
 
-        -- 1. Try game's native raycaster if available (original game logic)
-        local rawRaycast = rawget(Controllers.util, "_oldRaycast") or Controllers.util.Raycast
-        if rawRaycast then
-            local hit = rawRaycast(origin, targetPos)
-            if not hit then return true end
-            if typeof(hit) == "Instance" then
-                return hit:IsDescendantOf(targetPart.Parent)
-            elseif type(hit) == "table" and hit.Instance then
-                return hit.Instance:IsDescendantOf(targetPart.Parent)
-            end
-        end
-
-        -- 2. Fallback robust workspace raycast
-        local filterList = {localChar, Camera}
-        local viewmodels = workspace:FindFirstChild("ViewModels")
-        if viewmodels then table.insert(filterList, viewmodels) end
-
-        rawRayParams.FilterDescendantsInstances = filterList
-        local direction = targetPos - origin
-        local ray = workspace:Raycast(origin, direction, rawRayParams)
+        local direction = targetPart.Position - Camera.CFrame.Position
+        local ray = workspace:Raycast(Camera.CFrame.Position, direction, params)
 
         return ray == nil or ray.Instance:IsDescendantOf(targetPart.Parent)
     end
@@ -436,19 +389,22 @@ do
 
             if args.teamCheck ~= false and hrp:FindFirstChild("TeammateLabel") then continue end
 
-            local distance = (root.Position - hrp.Position).Magnitude
-            if selectionMode == "Distance" and distance > maxDist then continue end
-
             local target = targetPart == "Random" and getRandomPart(entity) or entity:FindFirstChild(targetPart)
             if not target then continue end
+
+            if args.wallCheck ~= false and not isVisible(char, target) then continue end
 
             local screenPos, onScreen = Camera:WorldToViewportPoint(target.Position)
             if not onScreen then continue end
 
+            local distance = (root.Position - hrp.Position).Magnitude
             local mouseDist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-            if selectionMode ~= "Distance" and mouseDist > fov then continue end
 
-            if args.wallCheck ~= false and not isVisible(char, target) then continue end
+            if selectionMode == "Distance" then
+                if distance > maxDist then continue end
+            elseif mouseDist > fov then
+                continue
+            end
 
             table.insert(results, {
                 entity = entity,
@@ -472,7 +428,6 @@ do
 
         return results[1].part, results[1].entity
     end
-
     PlayerUtility.predictPosition = function(target, projectileSpeed, shooterVelocity)
         shooterVelocity = shooterVelocity or Vector3.new()
 
@@ -528,6 +483,7 @@ do
 
         local maxTime = 5.0
         if t > maxTime then
+            local cappedLead = (targetVel * maxTime).Magnitude
             local dirToTarget = D.Unit
             if targetVel:Dot(dirToTarget) > 0 then
                 return targetPos + targetVel * maxTime
@@ -567,7 +523,7 @@ end)
 
 runcode(function()
     local WEAPON_CONFIG = {}
-    local oldRaycast
+    local oldRaycast, oldStartShooting, oldGetSpread
     local target
 
     local TargetPart = {Value = "Head"}
@@ -583,6 +539,7 @@ runcode(function()
     local DrawFOV = {Enabled = true}
     local FOVColor = {Color = Color3.fromRGB(255, 255, 255)}
 
+    -- Initialize Drawing API Circle
     local fovCircle = nil
     if Drawing and type(Drawing.new) == "function" then
         fovCircle = Drawing.new("Circle")
@@ -618,6 +575,7 @@ runcode(function()
         Function = function(callback)
             if callback then
                 RunLoops:BindToHeartbeat("SilentAim", function()
+                    -- Manage FOV Circle Drawing
                     if fovCircle then
                         local isFovActive = (Mode.Value == "FOV Circle" or Mode.Value == "Mouse")
                         local shouldBeVisible = DrawFOV.Enabled and isFovActive
@@ -631,6 +589,7 @@ runcode(function()
                         end
                     end
 
+                    -- Query entities based on selected targeting logic
                     target = PlayerUtility.NewGetNearestEntity({
                         targetPart = TargetPart.Value,
                         wallCheck = WallCheck.Enabled,
@@ -644,7 +603,6 @@ runcode(function()
                 end)
 
                 oldRaycast = Controllers.util.Raycast
-                Controllers.util._oldRaycast = oldRaycast
                 Controllers.util.Raycast = function(...)
                     local args = {...}
                     if target and math.random(100) <= HitChance.Value then
@@ -659,7 +617,6 @@ runcode(function()
             else
                 RunLoops:UnbindFromHeartbeat("SilentAim")
                 Controllers.util.Raycast = oldRaycast or Controllers.util.Raycast
-                Controllers.util._oldRaycast = nil
                 target = nil
                 if fovCircle then
                     fovCircle.Visible = false
@@ -729,6 +686,7 @@ runcode(function()
         Default = {R = 255, G = 255, B = 255}
     })
 
+    -- UI Visibility Triggers
     Mode:ShowWhen("Distance", MaxDistance)
     Mode:ShowWhen("Mouse", TargetingFOV)
     Mode:ShowWhen("FOV Circle", TargetingFOV)
@@ -787,6 +745,7 @@ runcode(function()
     })
 end)
 
+--// Utility
 runcode(function()
     local FastProjectiles = {}
     local Items
@@ -919,7 +878,7 @@ runcode(function()
         Function = function(callback)
             if callback then
                 RunLoops:BindToHeartbeat("ViewModel", function()
-                    local weapon = getweapon()
+                    local weapon = getweapon and getweapon()
                     local visual = weapon and weapon:FindFirstChild("ItemVisual")
                     if not visual then return end
 
@@ -1126,7 +1085,7 @@ runcode(function()
             if callback then
                 local shootingRange = workspace:FindFirstChild("ShootingRangeEntities")
                 RunLoops:BindToHeartbeat("ESP", function()
-                    local char = PlayerUtility.GetCharacter()
+                    local char = PlayerUtility.GetCharacter  ()
                     local seen = {}
 
                     for _, entity in ipairs(CollectionService:GetTagged("Entity")) do
@@ -1283,7 +1242,8 @@ runcode(function()
         return table.concat(out)
     end
 
-    local fontCache = {}
+    -- Cached Font to prevent allocating Font objects inside Heartbeat every frame
+    local cachedFont, cachedFontKey
     local function getFontFace()
         local family = fontOpt.Value
         if family == "GothamSSm" or family == "Gotham" then
@@ -1294,14 +1254,16 @@ runcode(function()
         local weightName = (weight.Value == "Off" and "Regular") or weight.Value
         local key = family .. "_" .. weightName
 
-        if not fontCache[key] then
-            fontCache[key] = Font.new(
+        if key ~= cachedFontKey or not cachedFont then
+            cachedFontKey = key
+            cachedFont = Font.new(
                 "rbxasset://fonts/families/" .. family .. ".json",
                 Enum.FontWeight[weightName],
                 Enum.FontStyle.Normal
             )
         end
-        return fontCache[key]
+
+        return cachedFont
     end
 
     Tags = GuiLibrary.Registry.renderPanel.API.CreateOptionsButton({
