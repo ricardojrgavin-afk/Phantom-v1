@@ -244,15 +244,20 @@ end
 local names = {"LocalScript3", "MiscellaneousController", "AnalyticsPipeline"}
 local function is_ac_calling()
     for i = 2, 15 do
-        local _, src = pcall(debug.info, i, "s")
-        for _, n in names do if src and src:find(n) then return true end end
+        local ok, src = pcall(debug.info, i, "s")
+        if ok and src then
+            for _, n in ipairs(names) do 
+                if src:find(n) then return true end 
+            end
+        end
     end
+    return false
 end
 
 local old_debug_info; old_debug_info = hookfunction(debug.info, newcclosure(function(f, l, ...)
     local res = { old_debug_info(f, l, ...) }
     if type(l) == "string" and l:find("s") and res[1] then
-        if res[1]:find("Ghost") or not res[1]:find(".lua") then
+        if type(res[1]) == "string" and (res[1]:find("Ghost") or not res[1]:find(".lua")) then
             return "CommonLib.lua"
         end
     end
@@ -261,7 +266,7 @@ end))
 
 local old_debug_traceback; old_debug_traceback = hookfunction(debug.traceback, newcclosure(function(...)
     local trace = old_debug_traceback(...)
-    if is_ac_calling() then
+    if is_ac_calling() and type(trace) == "string" then
         return trace:gsub("Ghost.-\n", "")
     end
     return trace
@@ -293,8 +298,10 @@ getgc = function(...)
     for i = 1, #gc do
         local v = gc[i]
         if typeof(v) == "function" then
-            local src = debug.info(v, "s")
-            if not (src and (src:find("LocalScript3") or src:find("MiscellaneousController"))) then
+            local ok, src = pcall(debug.info, v, "s")
+            if ok and src and (src:find("LocalScript3") or src:find("MiscellaneousController")) then
+                -- Omit AC functions
+            else
                 count += 1
                 filtered[count] = v
             end
@@ -316,7 +323,7 @@ end))
 repeat
     modLoaded = game:IsLoaded() and table.find(table.create(#getloadedmodules(), nil), true)
 
-    for _, v in getloadedmodules() do
+    for _, v in ipairs(getloadedmodules()) do
         if v.Name == "EntityController" then
             modLoaded = true
             break
@@ -372,10 +379,10 @@ local function hookmuzzle()
     return Camera.CFrame.Position
 end
 
--- Optimized Viewmodel Lookup Cache
+-- Refined Viewmodel Lookup Cache with Descendant Verification
 local cachedWeapon = nil
 local function getweapon()
-    if cachedWeapon and cachedWeapon.Parent and string.find(cachedWeapon.Name, lplr.Name) then
+    if cachedWeapon and cachedWeapon.Parent and cachedWeapon:IsDescendantOf(workspace) and string.find(cachedWeapon.Name, lplr.Name) then
         return cachedWeapon
     end
     local path = workspace:FindFirstChild("ViewModels")
@@ -387,6 +394,7 @@ local function getweapon()
             return v
         end
     end
+    cachedWeapon = nil
     return nil
 end
 
@@ -399,7 +407,7 @@ do
         
         for _ = 1, 10 do
             local randomInst = descendants[math_random(1, total)]
-            if randomInst:IsA("BasePart") then
+            if randomInst and randomInst:IsA("BasePart") then
                 return randomInst
             end
         end
@@ -636,7 +644,7 @@ runcode(function()
                 oldRaycast = Controllers.util.Raycast
                 Controllers.util.Raycast = function(...)
                     local args = {...}
-                    if target and math_random(100) <= HitChance.Value then
+                    if target and target.Parent and math_random(100) <= HitChance.Value then
                         local pos = target.Position
                         if Prediction.Enabled then
                             pos = PlayerUtility.predictPosition(target, getWeaponData().speed)
@@ -753,6 +761,30 @@ runcode(function()
     })
 end)
 
+--// AntiAFK
+runcode(function()
+    local AntiAFK = {}
+    local afkConn
+
+    AntiAFK = GuiLibrary.Registry.utillityPanel.API.CreateOptionsButton({
+        Name = "AntiAFK",
+        Function = function(callback)
+            if callback then
+                local VirtualUser = cloneref(game:GetService("VirtualUser"))
+                afkConn = lplr.Idled:Connect(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new())
+                end)
+            else
+                if afkConn then
+                    afkConn:Disconnect()
+                    afkConn = nil
+                end
+            end
+        end
+    })
+end)
+
 --// Utility
 runcode(function()
     local AntiFreeze = {}
@@ -784,18 +816,20 @@ runcode(function()
         Name = "FastProjectiles",
         Function = function(callback)
             if callback then
-                Items = Controllers.ItemLibrary.Items
+                Items = Controllers.ItemLibrary and Controllers.ItemLibrary.Items
 
-                for _, item in pairs(Items) do
-                    if type(item) ~= "table" then continue end
+                if Items then
+                    for _, item in pairs(Items) do
+                        if type(item) ~= "table" then continue end
 
-                    local reload = item.ReloadLength
-                    if reload ~= nil then
-                        if originalReloads[item] == nil then
-                            originalReloads[item] = reload
+                        local reload = item.ReloadLength
+                        if reload ~= nil then
+                            if originalReloads[item] == nil then
+                                originalReloads[item] = reload
+                            end
+
+                            item.ReloadLength = item.Name == "Daggers" and 0.09 or 0
                         end
-
-                        item.ReloadLength = item.Name == "Daggers" and 0.09 or 0
                     end
                 end
             else
@@ -855,8 +889,10 @@ runcode(function()
         Function = function(callback)
             if callback then
                 pingMeta = getmetatable(Controllers.util)
-                oldPing  = pingMeta.GetLocalConnectionPing
-                pingMeta.GetLocalConnectionPing = function() return 1000 end
+                if pingMeta then
+                    oldPing = pingMeta.GetLocalConnectionPing
+                    pingMeta.GetLocalConnectionPing = function() return 1000 end
+                end
             else
                 if pingMeta and oldPing then pingMeta.GetLocalConnectionPing = oldPing end
             end
@@ -868,6 +904,7 @@ end)
 runcode(function()
     local FPSBooster = {}
     local originalSettings = {}
+    local modifiedInstances = {}
 
     FPSBooster = GuiLibrary.Registry.renderPanel.API.CreateOptionsButton({
         Name = "FPSBooster",
@@ -875,17 +912,19 @@ runcode(function()
             if callback then
                 originalSettings.GlobalShadows = Lighting.GlobalShadows
                 originalSettings.FogEnd = Lighting.FogEnd
-                originalSettings.Technology = Lighting.Technology
 
                 Lighting.GlobalShadows = false
                 Lighting.FogEnd = 9e9
 
                 for _, inst in ipairs(Workspace:GetDescendants()) do
-                    if inst:IsA("BasePart") then
+                    if inst:IsA("BasePart") and inst.CastShadow then
+                        modifiedInstances[inst] = {CastShadow = inst.CastShadow}
                         inst.CastShadow = false
-                    elseif inst:IsA("Decal") or inst:IsA("Texture") then
+                    elseif (inst:IsA("Decal") or inst:IsA("Texture")) and inst.Transparency < 1 then
+                        modifiedInstances[inst] = {Transparency = inst.Transparency}
                         inst.Transparency = 1
-                    elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Smoke") or inst:IsA("Fire") then
+                    elseif (inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Smoke") or inst:IsA("Fire")) and inst.Enabled then
+                        modifiedInstances[inst] = {Enabled = inst.Enabled}
                         inst.Enabled = false
                     end
                 end
@@ -894,6 +933,15 @@ runcode(function()
                     Lighting.GlobalShadows = originalSettings.GlobalShadows
                     Lighting.FogEnd = originalSettings.FogEnd
                 end
+
+                for inst, props in pairs(modifiedInstances) do
+                    if inst and inst.Parent then
+                        for prop, val in pairs(props) do
+                            pcall(function() inst[prop] = val end)
+                        end
+                    end
+                end
+                table.clear(modifiedInstances)
             end
         end
     })
@@ -986,7 +1034,7 @@ runcode(function()
             else
                 RunLoops:UnbindFromHeartbeat("ViewModel")
                 for i, v in pairs(saved) do
-                    if i then
+                    if i and i.Parent then
                         i.Color = v[1]
                         i.Transparency = v[2]
                     end
@@ -1021,28 +1069,28 @@ runcode(function()
         Name = "SkinChanger",
         Function = function(callback)
             if callback then
-                for i in Controllers.cosLib.Cosmetics do
+                for i in pairs(Controllers.cosLib.Cosmetics) do
                     spoofTbl[i] = { IsUniversal = true }
                 end
 
                 local wepTbl = Controllers.pData.CurrentData:Get("WeaponInventory")
-                for i, v in wepTbl do
+                for i, v in pairs(wepTbl) do
                     wepTbl[i] = trans[v.Name] or v
                 end
 
                 coroutine.wrap(Controllers.pData.CurrentData.ReplicateFromServer)(Controllers.pData.CurrentData, "DataValueChanged", "WeaponInventory", wepTbl)
                 coroutine.wrap(Controllers.pData.CurrentData.ReplicateFromServer)(Controllers.pData.CurrentData, "DataValueChanged", "CosmeticInventory", spoofTbl)
 
-                local remote = ReplicatedStorage.Remotes.Data.EquipCosmetic
-                local method = string.lower("fireserver")
+                local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Data"):WaitForChild("EquipCosmetic")
+                local method = "fireserver"
                 hook = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
                     if self and self == remote and string.lower(getnamecallmethod()) == method then
                         local args = {...}
                         wepTbl = Controllers.pData.CurrentData:Get("WeaponInventory")
-                        for _, v in wepTbl do
+                        for _, v in pairs(wepTbl) do
                             if v.Name == args[1] then
                                 if args[3] then
-                                    v[args[2]] = { Name = args[3], Inverted = (args[2] == "Wrap" and (args[4].IsInverted or false)) or nil }
+                                    v[args[2]] = { Name = args[3], Inverted = (args[2] == "Wrap" and (args[4] and args[4].IsInverted or false)) or nil }
                                 else
                                     v[args[2]] = nil
                                 end
@@ -1099,9 +1147,9 @@ runcode(function()
                         local og = cvm._Setup
                         cvm._Setup = function(self)
                             if self.ClientItem and self.ClientItem.Name and trans[self.ClientItem.Name] then
-                                local og = self.Get
+                                local ogGet = self.Get
                                 self.Get = function(cSelf, id)
-                                    return (id == "Charm" and self.ClientItem and self.ClientItem.ClientFighter and self.ClientItem.ClientFighter.IsLocalPlayer and trans[self.ClientItem.Name] and trans[self.ClientItem.Name].Charm) or og(cSelf, id)
+                                    return (id == "Charm" and self.ClientItem and self.ClientItem.ClientFighter and self.ClientItem.ClientFighter.IsLocalPlayer and trans[self.ClientItem.Name] and trans[self.ClientItem.Name].Charm) or ogGet(cSelf, id)
                                 end
                             end
                             return og(self)
@@ -1136,7 +1184,7 @@ runcode(function()
 
     local function removeHL(entity)
         if highlights[entity] then
-            highlights[entity]:Destroy()
+            pcall(function() highlights[entity]:Destroy() end)
             highlights[entity] = nil
         end
     end
@@ -1181,7 +1229,9 @@ runcode(function()
                             end
                         end
 
-                        highlights[entity].FillTransparency = fill.Value / 100
+                        if highlights[entity] then
+                            highlights[entity].FillTransparency = fill.Value / 100
+                        end
                     end
 
                     for entity in pairs(highlights) do
@@ -1242,7 +1292,7 @@ runcode(function()
 
     local function removeTag(entity)
         if cache[entity] then
-            cache[entity].frame:Destroy()
+            pcall(function() cache[entity].frame:Destroy() end)
             cache[entity] = nil
         end
     end
@@ -1316,11 +1366,8 @@ runcode(function()
         local key = family .. "_" .. weightName
 
         if not fontCache[key] then
-            fontCache[key] = Font.new(
-                "rbxasset://fonts/families/" .. family .. ".json",
-                Enum.FontWeight[weightName],
-                Enum.FontStyle.Normal
-            )
+            local ok, font = pcall(Font.new, "rbxasset://fonts/families/" .. family .. ".json", Enum.FontWeight[weightName] or Enum.FontWeight.Bold, Enum.FontStyle.Normal)
+            fontCache[key] = ok and font or Font.fromEnum(Enum.Font.SourceSans)
         end
         return fontCache[key]
     end
@@ -1356,6 +1403,8 @@ runcode(function()
                         seen[entity] = true
 
                         local tag = cache[entity] or makeTag(entity)
+                        if not tag then continue end
+
                         local plr = Players:GetPlayerFromCharacter(entity)
                         local parts = {}
 
@@ -1417,7 +1466,7 @@ runcode(function()
                     removeTag(entity)
                 end
                 if gui then
-                    gui:Destroy()
+                    pcall(function() gui:Destroy() end)
                     gui = nil
                 end
             end
